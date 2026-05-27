@@ -1,0 +1,84 @@
+name: Check Release Notes
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to check"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  check_release_notes:
+    name: Check release notes
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Determine if release notes are required
+        id: pr_type
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+        run: |
+          echo "pr_number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+
+          # `chore:` PRs do not require release notes.
+          # `fix:`, `feat:` and `feat!:` PRs do require release notes.
+          if [[ "$PR_TITLE" =~ ^(fix|feat|feat!)(\(.+\))?:\  ]]; then
+            echo "PR title '${PR_TITLE}' requires release notes."
+            echo "requires_release_notes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "PR title '${PR_TITLE}' does not require release notes (chore or unknown prefix)."
+            echo "requires_release_notes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch PR description
+        if: steps.pr_type.outputs.requires_release_notes == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr_type.outputs.pr_number }}
+        run: |
+          gh pr view "$PR_NUMBER" \
+            --repo "${{ github.repository }}" \
+            --json body \
+            --jq '.body' > pr_body.md
+          echo "Fetched PR #${PR_NUMBER} description"
+
+      - name: Check release notes
+        if: steps.pr_type.outputs.requires_release_notes == 'true'
+        run: |
+          # Normalize line endings
+          tr -d '\r' < pr_body.md > pr_body_clean.md
+          mv pr_body_clean.md pr_body.md
+
+          # Find the line number of the last `---` horizontal rule.
+          # A horizontal rule in markdown is a line that contains only `---`
+          # (optionally surrounded by whitespace).
+          last_hr=$(grep -n -E '^[[:space:]]*---[[:space:]]*$' pr_body.md | tail -n 1 | cut -d: -f1)
+
+          if [[ -z "$last_hr" ]]; then
+            echo "::error::No release notes found in PR description."
+            echo "::error::Please add release notes to the PR description after a final '---' horizontal rule."
+            exit 1
+          fi
+
+          # Take everything after the last horizontal rule
+          notes=$(tail -n +$((last_hr + 1)) pr_body.md)
+
+          # Strip leading/trailing blank lines
+          notes=$(printf '%s\n' "$notes" | sed -e '/./,$!d' | tac | sed -e '/./,$!d' | tac)
+
+          if [[ -z "$notes" ]]; then
+            echo "::error::Release notes section is empty."
+            echo "::error::Please add release notes to the PR description after a final '---' horizontal rule."
+            exit 1
+          fi
+
+          echo "Release notes successfully extracted."
+          echo "----- Release notes -----"
+          echo "$notes"
+          echo "-------------------------"
