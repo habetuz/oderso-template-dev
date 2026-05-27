@@ -128,7 +128,6 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
-          token: ${{ secrets.BOT_PAT }}
       - name: Install typst
         run: |
           curl -L https://github.com/typst/typst/releases/download/v0.14.2/typst-x86_64-unknown-linux-musl.tar.xz -o typst.tar.xz
@@ -147,7 +146,6 @@ jobs:
       - name: Release dev repo
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
-          token: ${{ secrets.BOT_PAT }}
           files: |
             template/main-*.pdf
             documentation.pdf
